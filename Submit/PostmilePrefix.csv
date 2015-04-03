@@ -1,0 +1,15 @@
+Prefix,Meaning
+, Original
+C, Commercial Lanes
+D," Duplicate postmile at
+ meandering county line"
+G," Reposting of duplicate 
+ postmile at end of route"
+H, Overlap of D mileage
+L, Overlap postmile
+M, Realignment of R mileage
+N, Realignment of M mileage
+R, First realignment
+S, Spur
+T, Temporary connection
+U, Unrelinquished
