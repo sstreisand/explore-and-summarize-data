@@ -1,0 +1,1604 @@
+Project 3:  Annual Average Daily Traffic, CA, 2012 by Susan S.
+========================================================
+
+```{r echo=FALSE, message=FALSE, warning=FALSE, packages}
+# Load all of the packages that you end up using
+# in your analysis in this code chunk.
+
+# Notice that the parameter "echo" was set to FALSE for this code chunk.
+# This prevents the code from displaying in the knitted HTML output.
+# You should set echo=FALSE for all code chunks in your file.
+
+library(RColorBrewer)
+library(ggplot2)
+library(tidyr)
+library(reshape2)
+library(GGally)
+library(scales)
+library(gridExtra)
+library(Hmisc)
+#library(gdata)
+library(dplyr)
+```
+```{r echo=FALSE, Load_the_Data}
+# Load the project directory
+pdir <- "~/DataAnalystNanoDegree/DataAnalysisWithR/Project4"
+# Load the Data
+# read in the dataset, ignoring comments
+dfp3 <- read.csv(paste0(pdir, "/2012AADT.csv"), comment.char = "#")
+# Get county names
+county_table_CA <- read.csv(paste0(pdir, "/CA_Counties.csv"))
+# Get postmile prefix abbreviations
+postmile_prefix_table <- read.csv(paste0(pdir, "/PostmilePrefix.csv"))
+# Get route suffix abbreviations
+route_suffix_table <- read.csv(paste0(pdir, "/RouteSuffix.csv"))
+
+# Get alignment abbreviations
+alignment <- read.csv(paste0(pdir, "/Alignment.csv"))
+# Add names for unnamed columns
+colnames(dfp3)[3]<- "route_suffix"
+colnames(dfp3)[5]<- "postmile_prefix"
+colnames(dfp3)[7]<- "alignment"
+# Make all names lowercase
+colnames(dfp3)<- tolower(colnames(dfp3))
+colnames(county_table_CA) <- tolower(colnames(county_table_CA))
+colnames(route_suffix_table) <- tolower(colnames(route_suffix_table))
+colnames(alignment) <- tolower(colnames(alignment))
+# Change .s in names to _
+colnames(dfp3) <- gsub("\\.+", "_", colnames(dfp3), perl = T)
+colnames(route_suffix_table) <- gsub("\\.+", "_", 
+                                     colnames(route_suffix_table), perl = T)
+# Change route numbers and district numbers to factors
+dfp3$route <-as.factor(dfp3$route)
+dfp3$dist <- as.factor(dfp3$dist)
+#Add a column containing actual county names
+# This is the dplyr way, plus fixed column names to match
+# dfp3 - county is abbrev, county_name is full name
+county_table_CA <- rename(county_table_CA, county_name = county) %>%
+  rename(county = abbrev)
+county_table_CA$county <- as.character(county_table_CA$county)
+dfp3$county <- as.character(dfp3$county)
+dfp3 <- inner_join(dfp3, county_table_CA, by = "county")
+# Get population count for July 1, 2012 
+# Most columns are integers with commas - 
+# convert to int on read.csv trick learned from 
+# http://stackoverflow.com/questions/25088144/how-to-load-df-with-1000-separator-in-r-as-numeric-class
+library(methods)
+  setClass("int.with.commas", contains = integer())
+  setAs("character", "int.with.commas",
+      function(from) as.integer(gsub("\\,", "", from)))
+pop12 <- read.csv(paste0(pdir, "/CA_2012_2013pop.csv"), 
+               colClasses = c('character', 'int.with.commas', 'int.with.commas', 
+                              'int.with.commas', 'numeric', 'NULL',  
+                              'int.with.commas', 'int.with.commas', 
+                              'int.with.commas', 'int.with.commas', 
+                              'int.with.commas', 'int.with.commas'),
+               stringsAsFactors = F)
+colnames(pop12) <- tolower(colnames(pop12))
+colnames(pop12)[2] <- "pop20120701"
+colnames(pop12)[3] <- "pop20130701"
+# Change .s in names to _
+colnames(pop12) <- gsub("\\.+", "_", colnames(pop12), perl = T)
+
+# Get rid of CA total population line
+pop12 <- subset(pop12, county != "California")
+pop12 <- subset(pop12, (county != ""))
+
+# Found out the hard way that the county names wound up with leading and 
+# trailing spaces - need to remove them to map them
+pop12$county <- gsub("^ | $", "", pop12$county, perl = T)
+
+# Get subset of the data that has county names (remove bad data)
+dfp3 <- subset(dfp3, county != "")
+dfp3 <- subset(dfp3, !is.na(county))
+
+# add 2012 population to dataset
+dfp3 <- inner_join(dfp3, select(pop12, pop20120701, county),
+                           by = c("county_name" = "county"))
+dfp3 <- dplyr::rename(dfp3, county_pop = pop20120701)
+
+```
+
+```{r "Hw101 Dataset", echo=FALSE, message=FALSE, warning=FALSE}
+# I created a subset of the data that only included route = 101 and ordered it
+# by counties S to N, to create a dataset of traffic counts along the route
+# for analysis later
+
+hw101 <- subset(dfp3, route == "101")
+# County orders S to N for Hwy 101
+ocf <- c(
+  "LA", "VEN","SB", "SLO",
+  "MON", "SBT", "SCL", "SM", 
+  "SF", "MRN", "SON", "MEN", "HUM", "DN")
+ocfn <- c( "Los Angeles", "Ventura", "Santa Barbara", "San Luis Obispo",
+           "Monterey", "San Benito", "Santa Clara", "San Mateo", 
+           "San Francisco", "Marin", "Sonoma", "Mendocino", "Humboldt", 
+           "Del Norte")
+hw101$county <- ordered(hw101$county, levels = ocf)
+hw101$county_name <- ordered(hw101$county_name, levels = ocfn)
+hw101$county_postmile <- paste(as.character(hw101$county), 
+                               as.character(hw101$postmile_prefix),
+                               as.character(hw101$postmile),
+                               sep = '_')
+# get cumulative mileage for highway 101
+# cm101 is the cumulative milage at the beginning of each county
+cm101 <- array(dim = 14)
+cm101[1] <- 0
+for (i in 2:14) {
+  cm101[i] <- cm101[i-1] +
+    max(hw101$postmile[as.integer(hw101$county) == (i - 1)], na.rm = T)
+  }
+
+# County-wide cumulative mileage - same value for each county
+hw101$cm101 <- cm101[as.integer(hw101$county)]
+# Actual cumulative mileage at the traffic count point
+hw101$cm <- hw101$postmile + cm101[as.integer(hw101$county)]
+
+
+```
+
+# Univariate Plots Section  
+<pre>
+Dimensions of dataset:  `r dim(dfp3)`  
+</pre>
+Column names:  
+```{r echo=FALSE, "colnames"}
+colnames(dfp3)
+```   
+Structure of dataset:  
+```{r echo=FALSE}
+str(dfp3)
+```   
+Summary of dataset: 
+```{r echo=FALSE}
+summary(dfp3)
+```   
+
+* The maximum length of any route in a single county is approximately 186 miles.  
+* The hourly peak traffic ranges from 10 vehicles to 31,000 vehicles.    
+* The daily peak traffic ranges from 100 vehicles to 406,100 vehicles.   
+* The average daily traffic ranges from 80 vehicles to 377,500 vehicles.  
+
+
+
+I am not loading the CA traffic districts as a dataset, but am including the
+table here to help understand the plots by district.
+Traffic Districts
+<http://en.wikipedia.org/wiki/California_Department_of_Transportation#Districts>
+
+District|Counties
+--|--------------
+1 | Del Norte, Humboldt, Lake, Mendocino  Eureka
+2 |	Lassen, Modoc, Plumas, Shasta, Siskiyou, Tehama, Trinity; portions of Butte and Sierra	Redding
+3	| Butte, Colusa, El Dorado, Glenn, Nevada, Placer, Sacramento, Sierra, Sutter, Yolo,Yuba	Marysville
+4	| Alameda, Contra Costa, Marin, Napa, San Francisco, San Mateo, Santa Clara, Solano, Sonoma,	Oakland
+5	| Monterey, San Benito, San Luis Obispo, Santa Barbara, Santa Cruz	San Luis Obispo
+6	| Madera, Fresno, Tulare, Kings, Kern	Fresno
+7	| Los Angeles, Ventura	Los Angeles
+8	| Riverside, San Bernardino	San Bernardino
+9	| Inyo, Mono	Bishop
+10	|Alpine, Amador, Calaveras, Mariposa, Merced, San Joaquin, Stanislaus, Tuolumne	Stockton
+11	|Imperial, San Diego	San Diego
+12	|Orange	Irvine
+
+Frequency of District traffic counts:
+```{r echo=FALSE, "DistrictFreq"}
+# Frequency of district
+table(dfp3$dist)
+```
+<pre>
+Sorted highest to lowest number of traffic counts
+`r sort(table(dfp3$dist), decreasing = TRUE)`
+</pre>
+```{r echo = FALSE, Univariate_Plots1}
+p1 <- ggplot(data = dfp3, aes(x = dist)) + 
+  geom_bar(fill="#FF9999") +
+  theme(axis.text.x = element_text(angle=90)) +
+  ggtitle(label = "Frequency of California Traffic\nCounts by District") +
+  xlab("District")
+# change order of dist factor to frequency
+dfp3$dist <- with(dfp3, reorder(dist, X = as.numeric(dist),
+                                 function(x) -length(x)))
+p2 <- ggplot(data = dfp3, aes(x = dist)) + 
+  geom_bar(fill="#FF9999") +
+  theme(axis.text.x = element_text(angle=90)) +
+  ggtitle(label = "Sorted Frequency of CA Traffic\nCounts by District") +
+  xlab("District")
+grid.arrange(p1,p2, ncol=2)
+
+# put order of district factor back to numeric
+dfp3$dist <- with(dfp3, reorder(dist, as.numeric(dist)))
+```
+
+You can see from sorted traffic counts per district that district 4, which
+contains the San Francisco bay area, has the highest number of traffic counts.
+The lowest is district 9, which has the counties of Inyo, Mono, and Bishop
+
+Look at the traffic counts on the different routes.  As there are 243 routes,
+I am only listing the 20 with the most traffic counts and the 20 with the
+least traffic counts.
+```{r echo = FALSE, Univariate_Plots2}
+
+# Frequency of route (top 20)
+sort(table(dfp3$route), decreasing = TRUE)[1:20]
+sort(table(dfp3$route))[1:20]
+
+# Top 20 Routes with Most Traffic Counts
+dfp3$route <- with(dfp3, reorder(route, X = as.numeric(route),
+                                 function(x) -length(x)))
+ggplot(data = filter(dfp3, as.numeric(route) <= 20),
+  aes(x = route)) + geom_bar(fill="#FF9999") +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5)) +
+  xlab("Routes") +
+  ggtitle("Top 20 Routes with Most Traffic Counts") + 
+  scale_fill_brewer(palette="Paired") 
+
+
+```  
+
+**Route Suffix:**
+A few routes or sections of routes are considered unrelinquished - a new 
+alignment has been built, or the legislative definition has changed to omit the
+section, but the state still maintains the roadway - and are officially Route 
+XU. State Route 14U, an old alignment of State Route 14, is the only one signed 
+as such. Some new alignments are considered supplemental[5] and have a suffix 
+of S.  <http://en.wikipedia.org/wiki/State_highways_in_California>  The route 
+suffix column in the table is sparsely populated
+
+```{r echo=FALSE, "Frequency of other variables"}   
+# Frequency of route_suffix
+inner_join(count(dfp3,route_suffix), route_suffix_table, by="route_suffix")
+```
+
+How many traffic counts in each county, and plots of the top and bottom 20:
+
+```{r echo=FALSE, "county tc", warning=FALSE, message=FALSE}
+# How many traffic counts in each county
+table(dfp3$county_name)
+
+# Top 20 CA Counties with most traffic counts
+dfp3$county_name <- with(dfp3, 
+                         reorder(county_name, 
+                                 X=as.numeric(county_name), 
+                                 function(x) -length(x)))
+ggplot(data = filter(dfp3, as.numeric(county_name) <= 20),
+  aes(x = county_name )) +
+  geom_bar() +
+  theme( axis.text.x = element_text(angle=90, vjust = 0.5)) +
+  xlab("Counties") +
+  ggtitle("Top 20 CA Counties with Most Traffic Counts") 
+
+# Bottom 20 CA Counties with fewest traffic counts
+dfp3$county_name <- with(dfp3, 
+                         reorder(county_name, 
+                                 X=as.numeric(county_name), 
+                                 function(x) length(x)))
+ggplot(data = filter(dfp3, as.numeric(county_name) <= 20),
+  aes(x = county_name )) +
+  geom_bar() +
+  theme( axis.text.x = element_text(angle=90, vjust = 0.5)) +
+  xlab("Counties") +
+  ggtitle("Bottom 20 CA Counties with Fewest Traffic Counts") 
+
+```
+
+**Postmile and Postmile Prefix:**
+From <http://www.dot.ca.gov/hq/tpp/offices/oasp/index_files/Overview_of_Postmile_System_GIS_Resources_EC_031513.pdf>
+Postmile is the mile marker on the highway where the traffic measurement is 
+done. Postmile values reset to zero at all county boundaries except when
+the route meanders between two counties or realignment, relinquishment or
+adoption at beginning of a route.  Postmile increases on east and north
+sides of a route except for a few exceptions.
+
+New postmile values are assigned whenever a length of highway is changed due to
+construction or realignment. To differentiate the new values from the old, an 
+alpha code is added to the postmile as a prefix
+
+Here are the counts of postmile prefix along with the definitions of them.
+Note that not all prefixes are in use. 
+```{r "postmile prefix", echo=FALSE, message=FALSE, warning=FALSE}
+# Postmile prefix   
+#table(dfp3$postmile_prefix)  
+#postmile_prefix_table
+full_join(count(dfp3,postmile_prefix), postmile_prefix_table, 
+           by=c("postmile_prefix" = "Prefix"))
+
+# Postmile   
+qplot(data=dfp3, x = postmile, binwidth=5) + ggtitle("Histogram of Postmile")   
+```
+
+The highest postmile in a county is 186.  They are concentrated in the lower
+mileage.
+
+The alignment identifier is also called postmile suffix and identifies the
+independent alignment or unconstructed portion of highway.  Most highway
+does not have an independent alignment.
+
+**Alignment:**
+```{r "Alignment", echo=FALSE, error=FALSE, message=FALSE}
+# Alignment   
+inner_join(count(dfp3,alignment), alignment, 
+           by="alignment")
+```
+
+###Traffic Counts
+
+There are 6 different traffic count types in this dataset.  Three are taken
+ahead (North or East of the location), and three are back (South or West of
+the location).  
+*  AADT is Annual Average Daily Traffic - total volume for the year divided by 
+365 days.  It represents both directions of travel, so summing up would be 
+erroneous.
+
+* Peak Hour - estimate of heaviest traffic flow (usually rush hour).
+
+* Peak Month ADT - average daily traffic for month of heaviest traffic flow - 
+usually July or August, to take into account high seasonal volumes of traffic.
+
+The hourly counts are smaller than the daily counts, as is obvious from the
+boxplot below.
+```{r "Traffic Counts", echo=FALSE, error=FALSE, message=FALSE}
+# Traffic Counts
+
+tidyData <- melt(dfp3, id.vars = 1:8, measure.vars = 9:14, 
+                 variable.name = "variable", value.name = "value")
+ggplot(subset(tidyData, !is.na(value))) + 
+  geom_boxplot(aes(x = variable, y = value)) +
+  theme( axis.text.x = element_text(angle=90, vjust = 0.5))  +
+  xlab("Traffic Count Type") + ylab("Traffic Counts") +
+  ggtitle("Comparison of Traffic Count Types") 
+
+#----------
+ggplot(subset(tidyData, !is.na(value))) + 
+  geom_bar(aes(x = value, stat="stat_bin")) + 
+  facet_wrap(~variable) + 
+  ggtitle("Frequency Plot Comparison of Traffic Count Types") +
+  xlab("Traffic Count Value") + ylab("Frequency") +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5)) 
+```
+
+It is difficult to see the hourly and daily traffic counts in the same graph
+because the scales are so different.  If I use free scales for the facets
+it might look better.
+
+```{r "Free scales Traffic Frequency", echo=FALSE, error=FALSE, message=FALSE}
+ggplot(subset(tidyData, !is.na(value))) + 
+  geom_bar(aes(x = value, stat="stat_bin")) + 
+  facet_wrap(~variable, scales = "free") + 
+  ggtitle("Frequency Plot Comparison of Traffic Count Types") +
+  xlab("Traffic Count Value") + ylab("Frequency") +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5)) 
+
+```
+
+Hmm, I seem to remember seeing this type of distribution in one
+of the lessons and it was transformed into a normal distribution
+somehow...  Lesson 3.  By taking log.  I will try to take the log or sqrt.
+
+```{r "Traffic Distributions Log, Sqrt", echo=FALSE, error=FALSE, message=FALSE}
+ggplot(data = subset(tidyData, !is.na(value))) +
+  facet_wrap(~variable, scales = "free") + 
+  geom_bar(aes(x = value), binwidth = .1) +
+  ggtitle("Frequency Plot of Log of Different Traffic Count Types") +
+  scale_x_log10() + xlab("Traffic Counts (log10 scale)")
+
+ggplot(data = subset(tidyData, !is.na(value))) +
+  facet_wrap(~variable, scales = "free") + 
+  geom_bar(aes(x = sqrt(value) )) +
+  ggtitle("Frequency Plot of Sqrt of Different Traffic Count Types") + 
+  xlab("Traffic Count Value (sqrt)")
+```
+
+It looks like a bimodality - must be different types of highways
+Both transformations look more normal - log has no tail on right,
+sqrt has no tail on left  
+Try to figure out why it is bimodal - add population to tidyData and cut it
+into two levels:  county population under and over 1 Million people.
+
+```{r "Find Bimodality", echo=FALSE, error=FALSE, message=FALSE}
+tidyData2 <- melt(dfp3, id.vars = c(1:8,17), measure.vars = 9:14, 
+                 variable.name = "variable", value.name = "value")
+
+tidyData2$pop_level <- cut(tidyData2$county_pop, c(0, 1000000, 10000000), 
+                           labels = c("<= 1M", "> 1M"))
+ggplot(data = subset(tidyData2, !is.na(value))) +
+  facet_wrap(~variable + pop_level, scales = "free") + 
+  geom_bar(aes(x = value), binwidth = .1) +
+  ggtitle(
+    "Frequency Plot of Log of Traffic Count Types, High and Low Pop.") +
+  scale_x_log10() + xlab("Traffic Counts (Log10 Scale)")
+```  
+
+When I separate it out into counties that have under a Million population
+and over a Million Population, it separates the bimodality.
+Counties under a million have a more normally distributed traffic counts.
+Counties with over a million population have a higher skewed number of
+traffic count instances with high traffic counts.
+
+OK, technically this should go into the bivariate section, but it started off
+trying to investigate the traffic counts on their own.
+
+I wonder what these plots look like across the categorical variables of district,
+route, and county?
+
+
+
+Now let's look at the population by county (on July 1, 2012).  
+```{r "Population", echo=FALSE}
+arrange(pop12, desc(pop20120701))[,1:2]
+str(pop12[,1:2])
+summary(pop12[,1:2])
+
+ggplot(dfp3) + geom_boxplot(aes(x="All Counties", y = county_pop)) +
+  ggtitle("County Populations") + ylab("County Population") + 
+  xlab ("All Counties")
+```
+
+The high population of Los Angeles county distorts the mean.  
+Look at population frequency and then remove the Los Angeles outlier.
+
+```{r "pop freq", echo=FALSE}
+
+# Distribution
+qplot(data=dfp3, x=county_pop,
+      binwidth = max(dfp3$county_pop)/30) + 
+  ggtitle("Histogram of County Populations at Traffic Count Locations")
+
+# Outlier (Los Angeles) with a lot of traffic counts skews results
+qplot(data=subset(dfp3, county_pop < 5000000), x = county_pop,
+      binwidth = 100000) + 
+  ggtitle("Histogram of County Population Minus LA County Outlier")
+```
+
+When I get rid of Lost Angeles, the population distribution is more even.
+The counties with smaller population might have fewer traffic counts, but
+there are a lot of them.
+
+Plot county population, by county not by frequency in the dataset:
+```{r "More population"}
+q1 <- qplot(data=pop12, x = pop20120701, binwidth = max(pop12$pop20120701)/30) +
+  ggtitle("County Population\nWith Outlier") + xlab("County Population")
+q2 <- qplot(data=subset(pop12, pop20120701 < 5000000), x = pop20120701,
+            binwidth = 100000)  + xlab("County Population") +
+  ggtitle("County Population\nRemove Outlier")
+grid.arrange(q1, q2, nrow=2)
+```
+
+Los Angeles has a very high population, so it is an outlier and makes it more 
+difficult to see the population distribution in the lower counties.  Removing
+counties with populations > 5 Million (Los Angeles) helps make the rest 
+clearer.  There are still a lot of counties with population under 100,000.
+
+# Univariate Analysis
+
+### What is the structure of your dataset?
+There are 6768 traffic count locations in this dataset, with 8 original
+features: dist, route, route_suffix, county, postmile_prefix, postmile, 
+alignment, description 
+and 6 traffic count types: back_peak_hour, back_peak_month, back_aadt,
+ahead_peak_hour, ahead_peak_aadt, ahead_aadt plus county_name and county_pop 
+(population)
+
+There are 12 districts, 243 routes, 3 route suffixes (most are blank), 58 
+counties, 8 postmile prefixes (R is the most common besides blank),
+3 alignments (most are blank),
+5762 descriptions (which are the intersections with town or county/state line),
+and 537 missing traffic counts for each traffic type (at a boundary, the ahead
+and back counts are usually on separate lines).
+
+Other observations:  
+The most popular description is "JCT. RTE. 5". 
+The county with the most traffic count locations is Los Angeles.
+The district with the most traffic counts is 4, which includes San Francisco
+and Oakland.
+The route with the most traffic counts is 101.
+The ahead_peak_aadt was equal to or higher than the back_peak_month for 
+min/mean/median/max. (these are equivalent measures at front and back of 
+intersection, just not consistently named in source document)
+
+It seems that the route with the largest number of traffic counts is State 
+Highway 101, which covers California from South to North. There are 507 points 
+on highway 101. It might be an interesting roadway to investigate.
+
+The second most counted roadway is I-5. It is an interstate, not a state 
+highway and it also covers the whole state from South to North.
+
+The third most counted highway is highway 1, which hugs the coastline.
+The fourth is Highway 99. Those 4 have many more counts than the other highways.
+
+Los Angeles has a huge population, which raises the mean much higher than the 
+median county population.
+
+All of the traffic count types have a high concentration of counts that are in
+the lower 2/30 of the traffic count range.  The hourly traffic counts have a 
+slightly 
+different distribution than the daily traffic counts - the daily counts had more
+falling into the lower 1/30 than the hourly counts.
+
+
+### What is/are the main feature(s) of interest in your dataset?
+The main features of interest are the traffic counts, counties and routes.  
+I also added population from a separate table to do traffic correlation
+based on county population.
+
+### What other features in the dataset do you think will help support your investigation into your feature(s) of interest?
+The routes help me break the data set down into something I can look at.
+The population count also has the population difference between 2012 and 2013
+which could be useful to see if people came to or left areas of high traffic.
+But I will not have time to investigate that.
+
+### Did you create any new variables from existing variables in the dataset?
+I created a county_name variable which was the full name of the county
+taken from the county in the dataset which was actually an abbreviation.  
+
+In a subset of data for Highway 101 I created a cumulative mileage column.
+In the next sections I created a few summary datasets such as dfp3.bpm_by_county
+and dfp3.baadt_by_county to plot the mean traffic by county and do modeling to
+predict average traffic based on population.
+
+### Of the features you investigated, were there any unusual distributions? Did you perform any operations on the data to tidy, adjust, or change the form of the data? If so, why did you do this?
+
+I created a tidy data set of one variable/value pair per row so that I could
+plot the different traffic types in a facet.
+
+I looked at the traffic distributions and saw that a log transformation would
+make them more normal, so I plotted the log10 of the traffic counts.  It looked
+bimodal.  I separated it by county population - made two groups using cut: one 
+for counties with population under a million and the rest over a million.  
+This removed the bimodality.  Counties with under a million residents had a
+more normal-looking log traffic frequency distribution.
+
+I summarized the traffic (back peak month) by county_name since I had the 
+population of the counties, so I could compare the average traffic to the 
+county population.  I tried to find a correlation, so I plotted each 
+axis as a log function until I found one that looked correlated - the log
+of the county population is correlated with the log of the average traffic 
+(back peak month).
+ 
+To look at the county population distribution, I removed Los Angeles because it
+was such an outlier (population of over 9 million when next largest county only
+had 3 million).  It made the histogram spread out more.
+
+
+
+# Bivariate Plots Section
+Below is a correlation matrix of the numeric columns in my main data frame.
+
+```{r "Correlation Matrix", echo=FALSE}
+cor(select(dfp3, starts_with("ahead"),starts_with("back"), 
+           county_pop, postmile), use = "pairwise.complete.obs")
+```
+
+The traffic counts are all well correlated.  The traffic is somewhat 
+correlated with county population (around .5) - it is expected that more people
+lead to more cars and to more traffic even if there are other factors such as
+availability of public transportation that also affect traffic.  One surprising
+finding is that the postmile (distance from S or W end of route in county)
+is slightly negatively correlated with traffic and even more slightly 
+negatively correlated with county population.  There is slightly more traffic
+at the
+start of the route (S or W end).
+
+Look at traffic counts by district:  
+
+```{r "Traffic Counts by District", echo=FALSE, error=FALSE, message=FALSE}
+dfp3$dist <- with(dfp3, reorder(dist, as.numeric(dist)))
+
+ggplot(subset(dfp3, !is.na(back_aadt))) + 
+  geom_bar(aes(x = back_aadt, stat="stat_bin")) + 
+  facet_wrap(~dist, scales = "free") + 
+  ggtitle("Frequency Plot Comparison of AADT by District") +
+  xlab("Traffic Count Value") + ylab("Frequency") +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5)) 
+
+```
+
+You can see here that not all districts have bimodal traffic distributions.
+Districts 1, 2, and 3 are all less built up and have mostly decreasing 
+distributions.  District 4 has a few peaks and is taller with a short tail.  It 
+contains the San Franciso/Silicon Valley area and has a spread out high traffic.
+District 7 contains Los Angeles and it has a large second peak where there is
+a lot of traffic.  The last one with a big second peak is District 12,
+which contains Orange and Irvine counties.  This district is unique in
+that it does not have many areas with low traffic.  It has the highest
+traffic rates and a peak of roadway sites with traffic between 200 and 300 
+thousand cars a day.  As a side note, I once had a tour of the Irvine traffic
+control center and it was pretty impressive!
+
+
+```{r echo=FALSE, Bivariate_Plots}
+# Look at Route Suffix, Alignment, and Postmile Prefix by County
+p1 <- ggplot(data = subset(dfp3, route_suffix != ""), aes(x = route_suffix)) +
+  geom_bar(aes(fill = county_name), colour = "black") +
+  ggtitle("Non-Blank Route Suffix by County")
+p2 <- ggplot(data = subset(dfp3, alignment != ""), aes(x = alignment)) +
+geom_bar(aes(fill = county_name), colour = "black") +
+  ggtitle("Non-Blank Alignment by County")
+p3 <- ggplot(data = subset(dfp3, postmile_prefix != ""), 
+             aes(x = postmile_prefix)) +
+  geom_bar(aes(fill = county_name), colour = "black") +
+  theme(legend.text = element_text(size = 8), 
+        legend.key.size = unit(.3, "cm")) +
+  guides(colour=guide_legend(ncol=3), fill = guide_legend(ncol = 2)) +
+  ggtitle("Non-Blank Postmile Prefix by County")
+p1
+p2
+p3
+
+# Top 20 Routes with Most Traffic Counts by District
+dfp3$route <- with(dfp3, reorder(route, X = as.numeric(route),
+                                 function(x) -length(x)))
+
+ggplot(data = filter(dfp3, as.numeric(route) <= 20),
+  aes(x = route)) + geom_bar(aes(fill = dist)) +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5)) +
+  xlab("Routes") +
+  ggtitle("Top 20 Routes with Most Traffic Counts by District") + 
+  scale_fill_brewer(palette="Paired") 
+
+# Ahead AADT Distribution by Postmile Prefix
+k <- ggplot(subset(dfp3, !is.na(ahead_aadt)), 
+   aes(x = postmile_prefix, y = ahead_aadt))
+k + geom_boxplot(fill = "green") + 
+  ggtitle("Ahead AADT Distribution by Postmile Prefix") +
+  xlab("Postmile Prefix") + ylab("Ahead Annual Average Daily Traffic (AADT)")
+
+# Back AADT and Ahead AADT by County
+p1 <- ggplot(data = subset(dfp3, !is.na(back_aadt)), 
+                           aes(x = county, y = back_aadt)) + 
+  geom_point(alpha=.5, colour = "orange") +
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=90,hjust=.5,
+                                   vjust=.5,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=12,angle=0,hjust=1,
+                                   vjust=0,face="plain"),  
+        axis.title.x = element_text(colour="grey20",size=12,angle=0,hjust=.5,
+                                    vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey20",size=12,angle=90,hjust=.5,
+                                    vjust=.5,face="plain")) +
+  ggtitle(label = "CA Back AADT by County")
+p2 <- ggplot(data = subset(dfp3, !is.na(ahead_aadt)), 
+                           aes(x = county, y = ahead_aadt)) + 
+  geom_point(alpha=.5, colour = "green") +
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=90,hjust=.5,
+                                   vjust=.5,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=12,angle=0,hjust=1,
+                                   vjust=0,face="plain"),  
+        axis.title.x = element_text(colour="grey20",size=12,angle=0,hjust=.5,
+                                    vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey20",size=12,angle=90,hjust=.5,
+                                    vjust=.5,face="plain")) +
+  ggtitle(label = "CA Ahead AADT by County")
+grid.arrange(p1,p2, ncol = 1)
+
+# Back and Ahead Peak Month by County
+p1 <- ggplot(data = subset(dfp3, !is.na(back_peak_month)), 
+                           aes(x = county, y = back_peak_month)) + 
+  geom_jitter(alpha=.5, aes(colour = county)) +
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=90,hjust=.5,
+                                   vjust=.5,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=12,angle=0,hjust=1,
+                                   vjust=0,face="plain"),  
+        axis.title.x = element_text(colour="grey20",size=12,angle=0,hjust=.5,
+                                    vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey20",size=12,angle=90,hjust=.5,
+                                    vjust=.5,face="plain"), 
+        legend.position = 'none') +
+  ggtitle(label = "CA Back Peak Month AADT by County")
+p2 <- ggplot(data = subset(dfp3, !is.na(ahead_peak_aadt)), 
+                           aes(x = county, y = ahead_peak_aadt)) + 
+  geom_jitter(alpha=.5, aes(colour = county)) +
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=90,hjust=.5,
+                                   vjust=.5,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=12,angle=0,hjust=1,
+                                   vjust=0,face="plain"),  
+        axis.title.x = element_text(colour="grey20",size=12,angle=0,hjust=.5,
+                                    vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey20",size=12,angle=90,hjust=.5,
+                                    vjust=.5,face="plain"),
+        legend.text = element_text(size = 8), 
+        legend.key.size = unit(.3, "cm"),
+        legend.justification=c(1,1), legend.position = "bottom") +
+                       #legend.position=c(1,1)) + 
+  guides(colour=guide_legend(ncol=14)) +
+  ggtitle(label = "CA Ahead Peak Month AADT by County")
+grid.arrange(p1,p2, ncol = 1,  heights=c(3/7, 4/7)) 
+```
+
+These were some of my first plots. They are not very easy to read although
+they are colorful!  I hope I am not penalized for leaving them in.
+Orange County has the highest traffic, and
+then LA.
+
+```{r "Peak Month Hour Ratio", echo=FALSE, message=FALSE, warning=FALSE}
+# Ratio of Peak Month AADT to Peak Hour AADT
+p1 <- ggplot(dfp3) + 
+  geom_boxplot(aes( x = "Ahead", y = ahead_peak_aadt/ahead_peak_hour)) +
+  geom_boxplot(aes( x = "Back", y = back_peak_month/back_peak_hour)) +
+  theme( axis.text.x = element_text(angle=90, vjust = 0.5))  +
+  xlab("Traffic Count Type") + ylab("Traffic Counts") +
+  ggtitle("Peak Month AADT/Peak Hour") +
+  scale_y_continuous(limits = c(0,30))
+p2 <- ggplot(dfp3) + 
+  geom_boxplot(aes( x = "Ahead", y = ahead_aadt/ahead_peak_hour)) +
+  geom_boxplot(aes( x = "Back", y = back_aadt/back_peak_hour)) +
+  theme( axis.text.x = element_text(angle=90, vjust = 0.5))  +
+  xlab("Traffic Count Type") + ylab("Traffic Counts") +
+  ggtitle("Annual AADT/Peak Hour") +
+  scale_y_continuous(limits = c(0,30))
+
+grid.arrange(p1,p2, nrow = 1)
+```
+
+The statistics of the ratio of peak month AADT to peak hour AADT:
+
+```{r "stat ratio"}
+# Peak month daily vs peak hourly
+summary(dfp3$back_peak_month/dfp3$back_peak_hour)
+summary(dfp3$ahead_peak_aadt/dfp3$ahead_peak_hour)
+
+# Average daily vs peak hourly
+summary(dfp3$back_aadt/dfp3$back_peak_hour)
+summary(dfp3$ahead_aadt/dfp3$ahead_peak_hour)
+
+```
+
+Look at population by county.
+
+```{r "Pop by county", echo=FALSE}
+pop12$county_name <-  factor(pop12$county, 
+                             levels = pop12$county[order(-pop12$pop20120701)])
+ggplot(data = pop12) + 
+  geom_bar(aes(x = county_name, y = pop20120701),stat = "identity") +
+  theme(axis.text.x = element_text(angle=90, vjust=.5)) +
+  ggtitle("Population by County") +
+  xlab("County") + ylab("Population")
+```
+
+Los Angeles has such a high population that it skews results.  Looking at
+a log10 distribution shows all better.
+
+```{r "Pop by county2", echo=FALSE}
+ggplot(data = pop12) + 
+  geom_bar(aes(x = county_name, y = log10(pop20120701)),
+           fill = "orange", stat = "identity", colour = "black") +
+  theme(axis.text.x = element_text(angle=90, vjust=.5)) +
+  ggtitle("Log10 Population by County") + ylab("Log10(County Population)") +
+  xlab("County")
+```
+
+Traffic Counts by population - This won't work very well in a bivariate 
+plot because population is the same for all points in a county.
+
+# Bivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. How did the feature(s) of interest vary with other features in the dataset?
+Los Angeles county has a much larger population than all the other counties. 
+The Peak month annual average daily traffic was an average of 11 times greater 
+than the peak hourly
+average traffic.  The average daily traffic was only 10 times greater.
+
+### Did you observe any interesting relationships between the other features (not the main feature(s) of interest)?
+Only three counties (Los Angeles, San Bernardino, and Kern had roads with route suffixes appended while fourteen counties had alignment changes and all fifty-eight had at least one postmile prefix (most frequently 'R').
+
+I noticed in the plots that the postmile prefix 'M' had the highest mean AADT.
+'M' is the realignment of 'R' mileage, where 'R' was the first realignment.
+So it seems like when a second realignment is needed for a roadway, it tends to 
+have higher traffic than the first realignment ('R'), which also tended to have
+higher traffic than non-realigned roadways.
+
+The peak month daily traffic was an average of 11 times greater than the peak
+hourly traffic.
+
+### What was the strongest relationship you found?
+All of the traffic counts were correlated with each other, but that was to be 
+expected.  The strongest was back_aadt with back_peak_month - highest daily 
+traffic correlating to highest daily traffic in the peak month.  The ahead 
+traffic correlation was almost as high.  This means there weren't big anomalies
+in the peak monthly traffic.
+
+
+
+# Multivariate Plots Section
+
+Looking at Traffic counts on the routes that go through Alameda county.
+```{r echo=FALSE, Multivariate_Plots}
+# Alameda County traffic Counts by Route
+dfp3$route <- with(dfp3, reorder(route, as.numeric(route)))
+
+ggplot(data = subset(dfp3, county == "ALA" & !is.na(back_peak_month)), 
+       aes(x = postmile, y = back_peak_month)) + 
+  geom_line(aes(color = route)) +
+  geom_point(aes(color = route)) +
+  ggtitle("Back Peak Month Traffic By Route in Alameda County") +
+  scale_fill_brewer(palette="Paired") 
+```   
+
+I-80 only has less than 10 miles of roadway in the county but it has some of the
+highest traffic.  I-880 also has a lot of traffic at its beginning, but the 
+traffic drops. This plot is a little busy and may not be optimal.
+
+**Looking at Highway 101**  
+Instead of focusing on a county, I will focus on a route.
+Highway 101 from South to North goes through these counties in order: 
+(from <http://en.wikipedia.org/wiki/U.S._Route_101_in_California>)
+<pre>
+LA  - Los Angeles
+VEN - Ventura
+SB  - Santa Barbara
+SLO - San Luis Obispo
+MON - Monterey
+SBT - San Benito
+SCL - Santa Clara
+SM  - San Mateo
+SF  - San Francisco
+MRN - Marin
+SON - Sonoma
+MEN - Mendocino
+HUM - Humboldt
+DN  - Del Norte
+</pre>
+Look at the traffic on Highway 101 throughout it's length
+```{r echo=FALSE, Highway101}
+# County orders S to N for Hwy 101
+ocf <- c(
+  "LA", "VEN","SB", "SLO",
+  "MON", "SBT", "SCL", "SM", 
+  "SF", "MRN", "SON", "MEN", "HUM", "DN")
+ocfn <- c( "Los Angeles", "Ventura", "Santa Barbara", "San Luis Obispo",
+           "Monterey", "San Benito", "Santa Clara", "San Mateo", 
+           "San Francisco", "Marin", "Sonoma", "Mendocino", "Humboldt", 
+           "Del Norte")
+hw101$county <- ordered(hw101$county, 
+                       levels = ocf)
+hw101$county_name <- ordered(hw101$county_name, levels = ocfn)
+```
+
+Plotting traffic along Highway 101 with help from  
+<http://stackoverflow.com/questions/13616515/recommend-a-scale-colour-for-13-or-more-categories>
+and  
+<http://stackoverflow.com/questions/17844494/change-grid-line-behavior-in-ggplot2>
+```{r echo=FALSE, "Hw 101 Plot", fig.width=10, fig.height=7}
+
+# Plot ahead_aadt along Highway 101 S to N
+ggplot(aes(x = cm, y = ahead_aadt),
+       data = subset(hw101, !is.na(ahead_aadt))) + 
+  geom_point(aes(color = county_name) ) + geom_line(aes(color = county_name)) +
+  ggtitle("Ahead AADT Traffic Counts On US 101 (S to N)") + 
+  theme(axis.text.x = element_text(angle=90, size = 9,
+    color = "black", face = "plain", vjust = 0.5, hjust = 1), 
+    legend.justification=c(1,.3),
+    legend.text = element_text(size = 9), 
+    legend.position=c(1,.44),
+    panel.grid.major.x = element_line(colour = "black", linetype = "dotted")) +
+  xlab("Cumulative mileage") + ylab("Ahead AADT") +
+  scale_x_continuous(breaks = cm101, labels = round(unique(hw101$cm101)) )+
+#  scale_x_continuous(breaks = cm101, labels = NULL) +
+  scale_color_manual(values=c(brewer.pal(12,"Paired"),"#999999", "#FF9999"),
+                     name = "County")
+```
+Adding in peak traffic (the triangles)...  
+
+```{r "Highway 101 with peak traffic", echo=FALSE}
+# Look at peak traffic
+ggplot(aes(x = cm, y = ahead_aadt),
+       data = subset(hw101, !is.na(ahead_aadt))) + 
+  geom_point(aes(color = county_name) ) + geom_line(aes(color = county_name)) +
+  geom_point(aes(y = ahead_peak_aadt, color = county_name), shape = 2 ) +
+  ggtitle("Ahead Peak AADT Traffic\n Counts On US 101") + 
+  theme(axis.text.x = element_text(angle=90, size = 9,
+    color = "black", face = "plain", vjust = 0.5, hjust = 1), 
+                       legend.justification=c(1,.3), 
+                       legend.position=c(1,.44),
+    legend.text = element_text(size = 9),
+    legend.key.height=unit(.5,"line"),
+    panel.grid.major.x = element_line(colour = "black", linetype = "dotted")) +
+  xlab("Cumulative mileage") + ylab("Ahead (Peak) AADT") +
+  scale_x_continuous(breaks = cm101, labels = round(unique(hw101$cm101)) )+
+#  scale_x_continuous(breaks = cm101, labels = NULL) +
+  scale_color_manual(values=c(brewer.pal(12,"Paired"),"#999999", "#FF9999"),
+                     name = "County")
+```
+
+The triangles are peak month aadt - it looks like all of the peak traffic 
+locations still have room for even more traffic at peak seasons!
+Adding the peak traffic makes the plot look a little busy.  
+I will not use it for one of my final plots.
+
+I created a separate dataset called hw101 that is a subset of the main 
+dataset, but also has cumulative mileage.
+What are the column names in hw101 in the knitted dataset?  
+```{r "hw101", echo=FALSE, warning=FALSE, message=FALSE}
+colnames(hw101)
+str(hw101)
+
+
+# Look at population
+ggplot(aes(x = cm, y = county_pop),
+       data = subset(hw101, !is.na(county_pop))) + 
+#  geom_point(aes(color = county_name) ) + 
+  geom_line(aes(color = county_name)) +
+  geom_point(aes(y = ahead_aadt, color = county_name) ) + 
+  geom_line(aes(y = ahead_aadt, color = county_name), shape = 2) +
+  ggtitle("County Population and AAADT on Highway 101\nLimiting Population Scales") + 
+  theme(axis.text.x = element_text(angle=90, size = 9,
+    color = "black", face = "plain", vjust = 0.5, hjust = 1), 
+                       legend.justification=c(1,.3), 
+                       legend.position=c(1,.44),
+                       legend.key.height=unit(.5,"line"),
+    panel.grid.major.x = element_line(colour = "black", linetype = "dotted")) +
+  xlab("Cumulative mileage") + ylab("County Population/AAADT ") +
+  scale_x_continuous(breaks = cm101, labels = round(unique(hw101$cm101)) )+
+  scale_y_continuous(limits = c(0, 2500000)) +
+  scale_color_manual(values=c(brewer.pal(12,"Paired"),"#999999", "#FF9999"),
+                     name = "County")
+```
+
+I tried to plot county population and Ahead Annual Average Daily Traffic (AAADT)
+along Highway 101 on the same plot to show how traffic could be related to 
+population but I could not easily figure out how to get two scales on the same
+chart (which I used to do all the time in gnuplot with y1 and y2 axes).  It
+seems that the R way is not to mix scales but instead to facet.  If I had more time
+I would try to plot them together with a facet.  I limited the y scale so some
+higher populations were left out.  If I were using this graph I would have to foot
+note that.
+
+
+Next is a set of faceted plots like one of my final plots, but it does not
+have a free x scale.  Each plot is as wide and scaled as the county with the
+most mileage along highway 101.  The legend is outside the plot.
+
+```{r "facet 101 traffic not free", echo=FALSE}
+# Look at 3 Back Traffic Counts Together, Log scale
+ggplot(subset(hw101, county != "" & !is.na(back_aadt) & !is.na(back_peak_month) 
+              & !is.na(back_peak_hour))) + 
+  geom_point(aes(x = postmile, y = back_peak_hour, 
+             color = "Back Peak Hour", shape = "Back Peak Hour"), 
+             alpha = .75) +
+  geom_point(aes(x = postmile, y = back_peak_month, 
+             color = "Back Peak Month", shape = "Back Peak Month"), 
+             alpha = .75) +
+  geom_point(aes(x = postmile, y = back_aadt, 
+             color = "Back AADT", shape = "Back AADT"), alpha = .75) +
+  scale_y_continuous(trans=log10_trans()) +
+  scale_fill_discrete(name="Traffic Count Type") +
+  facet_wrap(~county_name) + ylab("Traffic Counts (Log10 Scale)") +
+  scale_shape_manual(values=c(1,3,4)) +
+  xlab("Milepost") +
+  ggtitle("Traffic Counts along CA Hwy 101 by County")
+```
+
+The next set of faceted plots brings the legend inside and colors it 
+to stand out.  It doesn't provide any new information.
+```{r "facet 101 traffic not free pink legend", echo=FALSE}
+
+# Add pink legend
+ggplot(subset(hw101, county != "" & !is.na(back_aadt) & !is.na(back_peak_month) 
+              & !is.na(back_peak_hour))) + 
+  geom_point(aes(x = postmile, y = back_peak_hour, 
+             color = "Back Peak Hour", shape = "Back Peak Hour")) +
+  geom_point(aes(x = postmile, y = back_peak_month, 
+             color = "Back Peak Month", shape = "Back Peak Month")) +
+  geom_point(aes(x = postmile, y = back_aadt, 
+             color = "Back AADT", shape = "Back AADT")) +
+  #scale_y_continuous(trans=log10_trans()) +
+  scale_color_discrete(name="Traffic Count Type") +
+  facet_wrap(~county_name) + ylab("Traffic Counts") +
+  scale_shape_manual(values=c(1,3,4), name = "Traffic Count Type") +
+  xlab("Milepost") +
+  ggtitle("Traffic Counts along CA Hwy 101 by County") +
+  theme(legend.justification=c(1,.3), legend.position=c(1,0),
+        legend.background = element_rect(fill="pink", size=.5, 
+                                         linetype="dotted"))
+```
+
+Another way to represent the traffic along highway 101 is by a boxplot
+by county.  It shows the traffic distribution in each county.  I also
+color-coded it by district.  Adjacent counties can be in the same district.
+It is obvious that districts 7 and 4 have higher traffic along highway
+101 than districts 5 and 1.
+
+```{r "boxplot 101 traffic", echo=FALSE}
+# Boxplot
+#scale_x_discrete(label = function(x){
+#    return(county_table_CA$county[county_table_CA$abbrev == x])}) +
+#data[complete.cases(data[,c(2,3,5)]),] 
+ggplot(hw101[complete.cases(hw101[,c(4,14)]),])+
+  geom_boxplot(aes(x=county_name, y=ahead_aadt, fill=dist)) +
+  ggtitle("Traffic (Ahead AADT) by County on Hwy 101 South to North") +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5))  + 
+  xlab("County") + ylab("Ahead Annual Average Daily Traffic") +
+  scale_fill_discrete(name = "District")
+
+```
+
+Look at traffic counts by postmile prefix per county along Highway 101:
+The most frequent is blank (no prefix), and the second most frequent is 
+'R', the first re-alignment.  Mendocino has some 'T', a temporary connection.
+Los Angeles has some 'S', a spur.  Del Norte also has an 'M', which is a
+realignment of 'R' (second realignment).
+```{r "hw101 traffic by postmile prefix", echo=FALSE}
+# Highway traffic counts by postmile prefix per county
+ggplot(hw101, aes(county_name)) +
+  geom_bar(aes(fill = postmile_prefix)) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  ggtitle("Highway 101 Traffic Counts By Postmile Prefix Per County") +
+  xlab("County") + scale_fill_discrete(name = "Postmile Prefix")
+```
+
+Another way to look at the postmile prefix is to graph them by amount of traffic
+and group by county.  The spurs usually have lower traffic.  Using a more divergent color scheme (I created it manually) helps.
+```{r "AAADT on 101 by postmile prefix", echo=FALSE}
+# Ahead AADT on 101 by county
+ggplot(subset(hw101, !is.na(ahead_aadt)), aes(x = county_name, y = ahead_aadt)) +
+  geom_point(aes(colour = postmile_prefix), alpha = .5) + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5)) +
+  ggtitle("Highway 101 Ahead AADT Per County and Postmile Prefix") +
+  xlab("County") + ylab("Ahead Annual Average Daily Traffic (AADT)") +
+  #scale_fill_discrete(name = "Postmile Prefix") +
+  scale_color_manual(values=c("green", "orange", "red", "black", "gold"),
+                     name = "Postmile Prefix")
+
+```
+
+GGpairs for the traffic count variables shows the correlation.
+
+```{r "GGpairs", echo=FALSE, warning=FALSE, message=FALSE}
+#Need to remove warnings from this
+# GGpairs - comparing the 6 different traffic types
+ggpairs(data = dfp3, columns = 9:14) + 
+  theme(axis.text.x = element_text(angle=90, size = 8), 
+        axis.text.y = element_text(angle=90, size = 8))
+```
+
+The GGpairs did not come out well.  It may not be polished, but it shows
+the correlations.  I could not find documentation on aligning column/row labels.
+```{r "More Multivariate", echo=FALSE}
+# Difference in Back and Ahead Peak Month AADT by County
+# I deleted rows that did not have ahead or back AADT
+#colors=rainbow( ncol(frame) ,s = 0.5, v = 1 )
+ggplot(data = subset(dfp3, !is.na(ahead_peak_aadt) & !is.na(back_peak_month)),
+     aes(x = county, y = back_peak_month - ahead_peak_aadt)) + 
+  geom_jitter(alpha=.5, aes(colour = county)) +
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=90,hjust=.5,
+                                   vjust=.5,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=10,angle=0,hjust=1,
+                                   vjust=0,face="plain"),  
+        axis.title.x = element_text(colour="grey20",size=12,angle=0,hjust=.5,
+                                    vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey20",size=12,angle=90,hjust=.5,
+                                    vjust=.5,face="plain"),
+        legend.text = element_text(size = 8), 
+        legend.key.size = unit(.3, "cm")) + 
+  guides(colour=guide_legend(ncol=2)) + 
+  #scale_colour_brewer(palette=c("Set1", "Set2", "Set3", "Set4", "Set5")) + 
+  ggtitle(label = "Difference in Back and Ahead Peak Month\nAADT by County")
+```
+
+Looking at the differences in back and ahead peak month (daily) and peak hour
+traffic, the differences are obviously bigger over an entire day.  If I had more
+time I would investigate by looking at the descriptions for the locations that
+had the biggest differences to see whether there was a large roadway at the
+intersection that was adding or siphoning off traffic.
+
+Limiting the difference to Highway 101 along its cumulative mileage makes the
+labelling easier and reduces the clutter.  We know there are big differences
+in San Francisco and you can see the points here.
+
+Here are the statistics of back_peak_month - ahead_peak_aadt: (it looks normal)
+```{r "stat1"}
+summary(dfp3$back_peak_month - dfp3$ahead_peak_aadt)
+qplot(dfp3$back_peak_month - dfp3$ahead_peak_aadt, binwidth = 10000) + 
+ggtitle("Distribution of back peak month - ahead peak aadt")  +
+  xlab("Back Peak Month - Ahead Peak AADT")
+```
+
+Difference in Back and Ahead Peak Hour by County
+```{r "Back-Ahead Peak Hour", echo=FALSE}
+ggplot(data = subset(dfp3, !is.na(ahead_peak_hour) & !is.na(back_peak_hour)),
+ aes(x = county, y = back_peak_hour - ahead_peak_hour)) + 
+  geom_jitter(alpha=.5, aes(colour = county)) +
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=90,hjust=.5,
+                                   vjust=.5,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=10,angle=0,hjust=1,
+                                   vjust=0,face="plain"),  
+        axis.title.x = element_text(colour="grey20",size=12,angle=0,hjust=.5,
+                                    vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey20",size=12,angle=90,hjust=.5,
+                                    vjust=.5,face="plain"),
+        legend.text = element_text(size = 8), 
+        legend.key.size = unit(.3, "cm")) + 
+  guides(colour=guide_legend(ncol=2)) + 
+  #scale_colour_brewer(palette=c("Set1", "Set2", "Set3", "Set4", "Set5")) + 
+  ggtitle(label = "Difference in Back and Ahead Peak Hour\nby County")
+```
+
+Here are the statistics of back_peak_hour - ahead_peak_hour: (it looks normal)
+```{r "stat2", echo=FALSE}
+summary(dfp3$back_peak_hour - dfp3$ahead_peak_hour)
+qplot(dfp3$back_peak_hour - dfp3$ahead_peak_hour, binwidth = 500) +
+ggtitle("Distribution of back peak hour - ahead peak hour")  +
+  xlab("Back Peak Hour - Ahead Peak Hour")
+
+# Difference in Back and Ahead Peack Hour along Highway 101
+ggplot(data = subset(hw101, !is.na(ahead_peak_hour) & !is.na(back_peak_hour)),
+ aes(x = cm, y = back_peak_hour - ahead_peak_hour)) + 
+  geom_point(alpha=.5, aes(colour = county)) +
+  theme(axis.text.x = element_text(colour="grey20",size=8,angle=90,hjust=.5,
+                                   vjust=.5,face="plain"),
+        axis.text.y = element_text(colour="grey20",size=10,angle=0,hjust=1,
+                                   vjust=0,face="plain"),  
+        axis.title.x = element_text(colour="grey20",size=12,angle=0,hjust=.5,
+                                    vjust=0,face="plain"),
+        axis.title.y = element_text(colour="grey20",size=12,angle=90,hjust=.5,
+                                    vjust=.5,face="plain"),
+        legend.text = element_text(size = 8), 
+        legend.key.size = unit(.3, "cm")) + 
+  guides(colour=guide_legend(ncol=1)) + 
+  #scale_colour_brewer(palette=c("Set1", "Set2", "Set3", "Set4", "Set5")) + 
+  ggtitle(
+    label = "Highway 101 Difference in Back and Ahead Peak Hour\nby County") +
+  xlab("Cumulative Mileage")
+
+```
+
+Traffic, population, by county.  Here I made a new summary dataframe with 
+back peak month mean/median/min/max/count.  I added in the population.
+
+```{r "Traffic, pop, by county", warning=FALSE, message=FALSE, echo=FALSE}
+dfp3.bpm_by_county <- dfp3 %>%
+  group_by(county_name) %>%
+  summarise(
+          bpm_mean = mean(back_peak_month, na.rm = T),
+          bpm_median = median(as.numeric(back_peak_month), na.rm = T),
+          bpm_min = min(as.numeric(back_peak_month), na.rm = T),
+          bpm_max = max(as.numeric(back_peak_month), na.rm = T),
+          n = n()) %>%
+  arrange(county_name)
+
+#add population
+dfp3.bpm_by_county <- inner_join(dfp3.bpm_by_county, 
+                                 pop12, by = c("county_name" = "county"))
+
+ggplot(data = dfp3.bpm_by_county, aes(x = n, y = bpm_mean)) + 
+  geom_point() + 
+  ggtitle("Average County Back Peak Month traffic by Number of Traffic Counts")
+  
+p <- ggplot(data = dfp3.bpm_by_county, aes(x = pop20120701, y = bpm_mean)) + 
+  geom_point() + 
+  ggtitle("Avg. County Back Peak Month\n Traffic by County Population") +
+   xlab("Population") + ylab("Back Peak Month")
+p1 <- p + scale_x_continuous(trans=log10_trans()) + xlab("log10(Population)") +
+  ylab("Back Peak Month")
+p2 <- p + scale_y_continuous(trans=log10_trans()) + xlab("Population") +
+  ylab("log10(Back Peak Month)")
+p3 <- p2 + scale_x_continuous(trans=log10_trans()) + xlab("log10(Population)") +
+  ylab("log10(Back Peak Month)") + geom_smooth(method = "lm")
+grid.arrange(p, p1, p2, p3,ncol = 2, nrow = 2)
+```
+
+I looked at the mean county traffic vs. the number of traffic counts in the county.
+I could see a relationship, but it wasn't exactly linear.
+Then I plotted mean county traffic vs. population.  It looked vaguely logarithmic
+so I plotted the logs of each variable until plotting logs of both made
+it look linear.  I added a lm line to the plot.
+
+Next I try to correlate the log of population with the log of back peak month
+traffic, since it looks linear.
+
+```{r "Correlation"}
+# It looks kind of linear when you take the log of population and traffic
+p.bpm.pop.cor <- with(dfp3.bpm_by_county,
+                      cor.test(log10(pop20120701), log10(bpm_mean)))
+k.bpm.pop.cor <- with(dfp3.bpm_by_county,
+     cor.test(log10(pop20120701),log10(bpm_mean), method = "kendall"))
+s.bpm.pop.cor <- with(dfp3.bpm_by_county,
+     cor.test(log10(pop20120701),log10(bpm_mean), method = "spearman"))
+# Pearson
+p.bpm.pop.cor
+# Kendall
+k.bpm.pop.cor
+# Spearman
+s.bpm.pop.cor
+```
+Both Pearson and Spearman test show a correlation around .93, while Kendall's
+test shows a lower correlation of .78
+but the p-value is very low (< 2.2e-16) so we reject the null hypothesis and we
+say that true correlation is not equal to 0.
+
+Now I am going to look at Back Annual Average Daily Traffic, which I think should be
+more representative of the population of a county than peak traffic.
+
+```{r echo=FALSE, "Population vs Back AADT"}
+dfp3.baadt_by_county <- dfp3 %>%
+  group_by(county_name) %>%
+  summarise(
+          baadt_mean = mean(back_aadt, na.rm = T),
+          baadt_median = median(as.numeric(back_aadt), na.rm = T),
+          baadt_min = min(as.numeric(back_aadt), na.rm = T),
+          baadt_max = max(as.numeric(back_aadt), na.rm = T),
+          n = n()) %>%
+  arrange(county_name)
+
+dfp3.baadt_by_county <- inner_join(dfp3.baadt_by_county, 
+                                 pop12, by = c("county_name" = "county"))
+# Look at number of traffic counts vs. county population
+ggplot(data = dfp3.baadt_by_county, aes(x = n, y = baadt_mean)) + 
+  geom_point() + 
+  ggtitle(
+    "Average County Back AADT \n by Number of Traffic Counts")
+# That actually looks kind of correlated
+with(dfp3.baadt_by_county,
+                        cor.test(n,baadt_mean))
+
+# It looks kind of linear when you take the log of population and traffic
+p.baadt.pop.cor <- with(dfp3.baadt_by_county,
+                        cor.test(log10(pop20120701),log10(baadt_mean)))
+k.baadt.pop.cor <- with(dfp3.baadt_by_county,
+     cor.test(log10(pop20120701),log10(baadt_mean), method = "kendall"))
+s.baadt.pop.cor <- with(dfp3.baadt_by_county,
+     cor.test(log10(pop20120701),log10(baadt_mean), method = "spearman"))
+# Pearson
+p.baadt.pop.cor
+# Kendall
+k.baadt.pop.cor
+# Spearman
+s.baadt.pop.cor
+```
+It looks like the Pearson and Spearman correlation is slightly higher using the
+Annual Average and not peak daily traffic, but the Kendall correlation is slightly
+lower.
+
+Now we can try to do a linear model.
+```{r "lm", echo=FALSE}
+fit.baddt <- lm(baadt_mean ~ pop20120701, data = dfp3.baadt_by_county)
+summary(fit.baddt)
+
+fit.log_log.baddt <- 
+  lm(log10(baadt_mean) ~ log10(pop20120701), data = dfp3.baadt_by_county)
+summary(fit.log_log.baddt)
+
+```
+
+Both models show high significance that some relationship exists between
+traffic and population.  The standard error should be at least an order of
+magnitude lower than the coefficient estimate and it is approximately so
+for both models.  R squared is higher for the log-log model, which means
+it fits better.
+
+
+Next I tried to plot traffic per population (ahead_peak_hour/county_pop).
+I noticed that Sierra county had some high outliers - this county does not
+have a large population but it does have I-80 which gets a lot of traffic.
+
+```{r "Still More population", message=FALSE, warning=FALSE, echo=FALSE}
+
+ggplot(data = subset(dfp3, !is.na(ahead_peak_hour)),
+       aes(x = county, y = ahead_peak_hour/county_pop)) + 
+  geom_boxplot() + 
+  scale_y_continuous(trans=log10_trans()) +
+  ggtitle("CA traffic per Population in July 2012 by County") +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5)) +
+  xlab("County") + ylab("Log10 Axis Traffic (ahead peak hour) per Population")
+```
+
+Now order the counties by the number of traffic counts per county (descending).
+
+When it is not plot on log scale, there is a huge outlier for Sierra County.
+But it looks like traffic does not go up linearly with population - because LA
+has such a large population, it has a very small traffic count/population ratio.  
+Alpine has a large ratio - either it has a lot of visitors, or 1/4 of the
+population drives on each state route.
+
+I plot it again in log scale.
+
+
+```{r "boxplot traffic counts per population", echo=FALSE}
+#order x by frequency of county (number of traffic counts per county)
+ggplot(data = subset(dfp3, !is.na(ahead_peak_hour)),
+       aes(x = reorder(county, -table(county)[county]),
+           y = ahead_peak_hour/county_pop)) + 
+  geom_boxplot() + #geom_bar(stat="identity") +
+  #scale_y_continuous(trans=log10_trans()) +
+  ggtitle("CA Ahead Peak Hour per Population in July 2012 by County") +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5)) +
+  xlab("County") + ylab("Traffic (ahead peak hour) per Population")
+# Needs to be in log scale to make it readable
+# This is in descending order of # of traffic counts in the county
+ggplot(data = subset(dfp3, county != ""),
+       aes(x = reorder(county, -table(county)[county]),
+           y = ahead_peak_hour/county_pop)) + 
+  geom_boxplot() + #geom_bar(stat="identity") +
+  scale_y_continuous(trans=log10_trans()) +
+  ggtitle("CA Traffic Counts per Population in July 2012 by County") +
+  theme(axis.text.x = element_text(angle=90, vjust = 0.5)) +
+  xlab("County") + ylab("Ahead Peak Hour Traffic log10 Scale per Population")
+```
+
+Now I am doing some investigations from my cumulative mileage on Highway 101 
+plot, investigating descriptions to find causes for fluctuations in traffic.
+Looking at S Santa Barbara and Santa Clara counties.  Looks like AAA Triptik!
+
+```{r "SB peak", echo=FALSE, warning=FALSE, message=FALSE}
+
+# Look for peak in Santa Barbara County
+sbt <- subset(hw101, !is.na(ahead_aadt) &
+                       county == "SB" &
+                cm < hw101$cm[description == "HOLLISTER AVENUE"])
+ggplot(aes(x = cm, y = ahead_aadt),
+       data = sbt) + 
+  geom_point(aes(color = county_name) ) + geom_line(aes(color = county_name)) +
+  ggtitle("Ahead AADT Traffic Counts On US 101 in S Santa Barbara Cty") + 
+  theme(axis.text.x = element_text(angle=90, size = 9,
+    color = "black", face = "plain", vjust = 0.5, hjust = 1), 
+                       legend.justification=c(0,.3), 
+                       legend.position=c(0,.7),
+    legend.background = element_rect(fill="gray74", size=.5, 
+                                         linetype="dotted"),
+    panel.grid.major.x = element_line(colour = "black", linetype = "dotted")) +
+  xlab("Cumulative Mileage") + ylab("Ahead AADT") +
+  scale_x_continuous(breaks = sbt$cm,
+                     labels =  sbt$description) +
+  scale_color_manual(values=c(brewer.pal(12,"Paired"),"#999999", "#FF9999"),
+                     name = "County")
+
+# Look for peak in Santa Clara County
+# This kind of looks like a AAA TripTik
+sct <- subset(hw101, !is.na(ahead_aadt) &
+                       county == "SCL")
+ggplot(aes(x = cm, y = ahead_aadt),
+       data = sct) + 
+  geom_point(aes(color = county_name) ) + geom_line(aes(color = county_name)) +
+  ggtitle("Ahead AADT Traffic Counts On US 101 in Santa Clara Cty") + 
+  theme(axis.text.x = element_text(angle=90, size = 7,
+    color = "black", face = "plain", vjust = 0.5, hjust = 1), 
+                       legend.justification=c(0,.3), 
+                       legend.position=c(0,.7),
+    legend.background = element_rect(fill="gray74", size=.5, 
+                                         linetype="dotted"),
+    panel.grid.major.x = element_line(colour = "black", linetype = "dotted")) +
+  xlab("Cumulative Mileage") + ylab("Ahead AADT") +
+  scale_x_continuous(breaks = sct$cm,
+                     labels =  sct$description) +
+  scale_color_manual(values=c(brewer.pal(12,"Paired"),"#999999", "#FF9999"),
+                     name = "County")
+
+# thanks to TA suggestion and 
+# http://stackoverflow.com/questions/5208679/order-bars-in-ggplot2-bar-graph
+```
+
+# Multivariate Analysis
+
+### Talk about some of the relationships you observed in this part of the investigation. Were there features that strengthened each other in terms of looking at your feature(s) of interest?
+Looking at Descriptions helped me understand the traffic flows more, but not
+in a statistical way.  If I had some text analysis I could have actually used
+the descriptions more.  It might also have helped to know how many lanes were
+in the highways at each point.
+
+My early investigations did a lot of investigations by
+county since that was a convenient feature to use.  Later I was able to add
+the county populations, which helped to clarify why certain counties were 
+showing certain properties - it was based at least somewhat on their
+population.  These two features are not independent, but since population is
+numeric, it helps to quantify the relationship.
+
+I also saw how the back and ahead traffic counts in an intersection could
+vary, but they were seemingly normal.  
+
+### Were there any interesting or surprising interactions between features?
+I saw that the traffic counts were bimodal.  When faceted the log of the
+traffic counts
+by high and low county populations (greater or less than 1 million), I came
+up with separate distributions that looked more normal, although the larger 
+counties had traffic counts that were heavily weighted on the higher end.
+
+### OPTIONAL: Did you create any models with your dataset? Discuss the strengths and limitations of your model.
+I created a model to predict average traffic for a county based on the county 
+population.  Since I only had average population across the entire county,
+it couldn't be too accurate - the traffic fluctuates in a county.  It actually
+uses the log of the population vs. the log of the traffic.  It could be made
+stronger perhaps if I had more data about the type of roadway (number of lanes,
+etc.) and more demographic information.
+
+------
+
+# Final Plots and Summary
+
+### Plot One
+```{r echo=FALSE, Plot_One}
+#Back Traffic Counts by county along CA Hwy 101
+ggplot(subset(hw101, county != "" & !is.na(back_aadt) & 
+                !is.na(back_peak_month) & !is.na(back_peak_hour))) + 
+  geom_point(aes(x = postmile, y = back_peak_hour, 
+             color = "Back Peak Hour", shape = "Back Peak Hour")) +
+  geom_point(aes(x = postmile, y = back_peak_month, 
+             color = "Back Peak Month", shape = "Back Peak Month")) +
+  geom_point(aes(x = postmile, y = back_aadt, 
+             color = "Back AADT", shape = "Back AADT")) +
+  #scale_y_continuous(trans=log10_trans()) +
+  scale_color_discrete(name="Traffic Count Type") +
+  facet_wrap(~county_name, scales = "free_x") + ylab("Traffic Counts") +
+  scale_shape_manual(values=c(1,3,4), name = "Traffic Count Type") +
+  xlab("Milepost") +
+  ggtitle("Traffic Counts along CA Hwy 101 by County (S-N)") +
+  theme(legend.justification=c(1,.3), legend.position=c(1,0),
+        legend.background = element_rect(fill="pink", size=.5, 
+                                         linetype="dotted"))
+
+```
+
+### Description One
+This is a faceted plot of the three back traffic types along Highway 101 by 
+county.  The mileposts run from South to North.  Each count type has a different
+shape and color. I kept the y (traffic count) axis the same for all counties so
+they could be compared, but let the x (postmile) axis free so some counties
+are more spaced out.  
+
+This plot type, unlike the unfaceted plot later, lets the 3 traffic types show
+clearly in each county, although the scale doesn't allow you to see much 
+variation in hourly traffic.  
+Back peak hour traffic is always lower than the other two, 
+which measure entire days.  The traffic hits its peak in Los Angeles county
+where counts are closely spaced together,
+and then decreases through the rest of Los Angeles and Ventura counties.  There 
+is a local peak in Santa Barbara and counts are father apart in the middle of 
+Santa Barbara.  They start rising slightly travelling North in Monterey,
+and increase more in Santa Clara and San Mateo, before peaking in San Mateo
+county and starting to decrease.  There is a big drop in San Francisco county,
+as Highway 101 goes through the city - further investigation is warranted.
+
+Looking at the raw traffic data, the drop occurs at the junction with
+I-80 (Bay Bridge), before S. Van Ness Avenue - a city street does not have
+the same capacity as a highway and much of the traffic continues to I-80.
+
+Traffic increases when approaching the Golden Gate Bridge and then peaks in 
+Marin County in San Rafael, peaks (but lower) in Sonoma county in Santa Rosa,
+and then decreases to lower levels in the northern counties.
+
+
+### Plot Two
+```{r echo=FALSE, fig.width=10, Plot_Two}
+
+p <- ggplot(data = dfp3.baadt_by_county, aes(x = pop20120701, y = baadt_mean)) + 
+  geom_point() + 
+  ggtitle(
+    "County-Average Back AADT\n by County Population") +
+   xlab("Population") + ylab("Back AADT")
+p1 <- p + scale_x_continuous(trans=log10_trans()) + xlab("log10(Population)") +
+  ylab("Back AADT")
+p2 <- p + scale_y_continuous(trans=log10_trans()) + xlab("Population") +
+  ylab("log10(Back AADT)")
+p3 <- p2 + scale_x_continuous(trans=log10_trans()) + xlab("log10(Population)") +
+  ylab("log10(Back AADT)") + geom_smooth(method = "lm")
+grid.arrange(p, p1, p2, p3,ncol = 2, nrow = 2)
+```
+
+### Description Two
+This plot shows the attempt to find a relationship between average traffic on county roadways and the population of the county.  The AADT is the Annual Average Daily Traffic - the total volume for the year divided by 365 days.  My assumption is that
+a county with higher population would have higher average traffic counts.  This might not always be the case because some cities have higher public transportation usage. 
+
+I looked at the County-Average (mean) back (south or west of the intersection) average anual daily traffic vs. county population. I could see a relationship, but it wasn't exactly linear.  It looked vaguely logarithmic so I plotted the logs of each variable against the other and they still didn't look linear.  Plotting logs of both traffic and population made it look linear. I show a grid of all four plots here to show my thought process.  I added a lm line to the plot to show the relative linearity of this model.
+
+My assumption is that the daily average would have a higher correlation to population than the daily or seasonal peak, since it isn't a peak that could be influenced by tourists or commuters.
+
+### Plot Three
+```{r echo=FALSE,fig.height=6, fig.width=10, Plot_Three}
+# Plot ahead_aadt along Highway 101 S to N
+ggplot(aes(x = cm, y = ahead_aadt),
+       data = subset(hw101, !is.na(ahead_aadt))) + 
+  geom_point(aes(color = county_name) ) + geom_line(aes(color = county_name)) +
+  ggtitle("Ahead AADT Traffic Counts On US 101 (S to N)") + 
+  theme(axis.text.x = element_text(angle=90, size = 9,
+    color = "black", face = "plain", vjust = 0.5, hjust = 1), 
+                       legend.justification=c(1,.3), 
+                       legend.position=c(1,.44),
+    legend.background = element_rect(fill="gray80", size=.5, 
+                                         linetype="dotted"),
+    panel.grid.major.x = element_line(colour = "black", linetype = "dotted")) +
+  xlab("Cumulative Mileage") + ylab("Ahead AADT") +
+  scale_x_continuous(breaks = cm101, labels = round(unique(hw101$cm101)) )+
+  scale_color_manual(values=c(brewer.pal(12,"Paired"),"#999999", "#FF9999"),
+                     name = "County")
+
+```
+
+These are Ahead Annual Average Daily Traffic counts, meaning they were taken 
+at the North or East side of the location.
+### Description Three
+This was the plot I worked on the longest.  It shows the Ahead Annual Average
+Daily Traffic (Ahead AADT) for California Highway 101 from South to North.  I
+had to create the cumulative total mileage for Highway 101 by adding the maximum
+postmile reading from each county to that of all counties south of it along the
+highway (counties in order determined from Wikipedia entry).
+There are some counties which only have a short distance and thus the mileage
+almost overlaps with the neighboring borders.
+
+I used a palette that provides a contrast between neighboring counties, instead 
+of the standard palette.  It was difficult to find a palette like that which
+had enough colors, so I had to add two manually.  
+
+This plot shows how the traffic varies with location.  I also did a subplot
+for part of Santa Barbara (in multiplot section)
+where I included the location description, which
+demonstrates what is going on at the location.
+
+This plot shows that Los Angeles county has some of the highest average daily
+traffic. It does a better job of showing how the traffic compares along the
+entire route than the facetted plot does.  The traffic increases around
+the San Francisco Bay Area.  The northern part of the state has the lowest
+traffic.
+
+### Plot Four
+```{r "Plot 4", echo=FALSE, message=FALSE, warning=FALSE, fig.width=10}
+
+# Ahead AADT Distribution by Postmile Prefix
+
+mytable <- cbind(as.character(postmile_prefix_table$Prefix),
+                 as.character(postmile_prefix_table$Meaning))
+dfp3 <- left_join(dfp3, postmile_prefix_table, 
+                  by = c("postmile_prefix" = "Prefix"))
+
+k <- ggplot(subset(dfp3, !is.na(ahead_aadt)), 
+   aes(x = postmile_prefix, y = ahead_aadt))
+k + geom_boxplot(aes(fill = paste(postmile_prefix,Meaning, sep = " - "))) + 
+  ggtitle("Ahead AADT Distribution by Postmile Prefix") +
+  xlab("Postmile Prefix") + ylab("Ahead Annual Average Daily Traffic (AADT)") + 
+  theme(legend.key.width=unit(2,"cm")) +
+  scale_fill_discrete(name="Postmile Prefix")
+ 
+```
+
+### Description Four
+This plot is a basic boxplot, but it shows something interesting.  It is added
+for variety.  It shows the 
+distribution of the ahead (North or East of the intersection) average annual 
+daily traffic (AADT) by postmile prefix. Notice that the postmile prefix 'M', 
+which means 'Realignment of R mileage', has the highest Ahead AADT.  It is even
+higher than the AADT in the first realignment ('R').  It seems that no roadways
+with very low traffic were realigned twice.  But no roadways with traffic 
+above 300,000 cars/day were realigned twice either.
+
+Another thing that could be added is the relative count of each postmile 
+prefix - how to best represent that along with the 
+distributions?  Or we could compare future years to see how realignments
+increase over time relative to traffic counts or population.  
+
+------
+
+# Reflection
+My biggest struggle in this analysis was knowing when to quit.  Even now, I 
+keep finding more things I would like to investigate and different ways I can
+improve what I've already done, but I've been working 
+on this for over 3 weeks and would like to finish.
+When I first picked the dataset, I wasn't sure it was good enough.  I didn't 
+know what I could model. I had some suggestions to add population data and that
+really helped make it more interesting.
+
+For a long time I struggled with how to present the data.  I wanted to show
+traffic patterns along
+a highway, and my first approach was to facet it by county.  I didn't realize
+I could free the scales so that different counties could have different lengths.
+I had to gradually learn the features of ggplot2 and dplyr to be able to do what 
+I wanted it to do.  So in the beginning, I used some not-polished coding and as I 
+went along and tried to do more things I learned more and changed my way of 
+doing things.  But I did not always go back and update what I had already done,
+so you can see different levels of skills in the work.
+
+If I had highway lane data, that might help do better traffic predictions.
+Also, I wanted to plot population along highway 101 to see how it correlated to
+traffic.  So I just went back and tried to do it, but realized it is not needed
+and I need to to go sleep, so I left what I had there.  I had to scale y to 
+leave out Los Angeles as it was skewing the plot too much.  I wanted to plot
+population and traffic on different axes but ggplot2 doesn't seem to allow that.
+I suppose I could scale the population by dividing by some amount.  I am leaving
+that for future work.
+
+My biggest struggle will be to organize the plots in a logical order and
+comment them all.  With a single laptop screen and a broken printer, I have no
+easy way to go through it.  When I printed out my final and  needed to make
+changes, I
+inadvertently deleted some text and didn't catch it at the end because I could
+not print it out again before I submitted.
+
+Thank you to Olivia and all the other TA's who helped me on this journey!
+
+
