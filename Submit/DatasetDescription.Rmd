@@ -1,0 +1,187 @@
+---
+title: "P3 Document My Data"
+author: "Susan S."
+date: "Monday, March 23, 2015"
+output: html_document
+---
+
+#Document Your Data
+My dataset is **California Average Annual Daily Traffic Counts for 2012**  
+The data was obtained at 
+<http://traffic-counts.dot.ca.gov/docs/2012AADT.xlsx>
+
+##Description of the Data Set  
+This dataset has district (dist) and route which are numeric factors, and 
+county which is a character factor, and a numeric milepost field (postmile). 
+There are three columns containing
+alphabetic keys, and a character description (description) which are all 
+factors.
+Then there are 6 integer traffic count fields - three are at the back of the
+location (South or West), and three are Ahead of the location (North or East).
+There are back and ahead peak_hour counts, as well as back and ahead peak_month 
+counts and back and ahead AADT (Annual Average Daily Traffic) and is the total
+volume for the year divided by 365 days
+
+**Detailed Description with details taken  from 
+<http://traffic-counts.dot.ca.gov/2012all/>:**    
+This file list 2012 traffic 
+volumes for all count locations on the California state highway system. Peak 
+hours, peak
+month ADTs and annual ADTs are shown at each count location. Significant volume
+changes (breakpoints) in the traffic profile along each route are counted and 
+identified by name and milepost value. In addition to the profile breakpoints, 
+these files list county lines and well-known landmarks to aid in orientation. 
+All traffic volume figures listed include traffic in both directions unless 
+otherwise indicated.
+The fields that designate the location are:
+
+1. Dist - Caltrans District (Number, but categorical variable with 12 levels)
+2. Route - California state highway Legislative Route number (Number, but 
+categorical variable, with 243 levels)
+3. County - County (2 or 3-character abbreviation of county, categorical 
+variable with 59 levels )
+4. Postmile - Mile post on the numbered route (Numeric, continuous variable)
+5. Description - Name of city and intersecting street or landmark where traffic
+count is located (Text - Categorical variable with 5762 levels)
+ 
+There were 3 unnamed columns (X, X.1, and X.2) in the data when I loaded it 
+into the dataframe.  They were mostly blank, but were sometimes populated by
+single characters.  I did some
+investigation to find out what the column names were and what the abbreviations
+in the fields meant.  
+**X** - Route Suffix - it came after the Route Number and designates 
+(S)upplemental or (U)nrelinquished routes. (factor with 3 levels)        
+**X.1** - Postmile Prefix - it designated any changes in the mile post 
+numbers and the reason (factor with 8 levels that were present)       
+**X.2** - Alignment - (L)eft Independent Alignment or (R)ight Independent 
+Alignment or blank (factor with 3 levels)  
+See below for descriptions of these columns.
+
+
+There are 6 different traffic counts at each location - Annual ADT, Peak Hour, 
+and Peak Month ADT for both Back and Ahead of the location.  
+Each of these are 
+integers and represent the traffic counts at that location.  In some instances,
+certain traffic counts might be missing.  Break points or landmarks might not 
+have any traffic counts.  I did not remove them from the main data set as
+I wasn't sure if they might be useful later.
+
+The different traffic counts are: 
+(taken from <http://traffic-counts.dot.ca.gov/2012all/> )  
+**Annual Average Daily Traffic (Annual ADT)** - Annual average daily traffic is 
+the total volume for the year divided by 365 days. The traffic count year is 
+from October 1st through September 30th. Very few locations in California are 
+actually counted continuously. Traffic Counting is generally performed by 
+electronic counting instruments moved from location throughout the State in a
+program of continuous traffic count sampling. The resulting counts are adjusted
+to an estimate of annual average daily traffic by compensating for seasonal 
+influence, weekly variation and other variables which may be present. Annual
+ADT is necessary for presenting a statewide picture of traffic flow, evaluating
+traffic trends, computing accident rates. planning and designing highways and
+other purposes.
+
+**Peak Hour** - Included is an estimate of the "peak hour" traffic at all points
+on the state highway system. This value is useful to traffic engineers in 
+estimating the amount of congestion experienced, and shows how near to capacity
+the highway is operating. Unless otherwise indicated, peak hour values indicate
+the volume in both directions.
+A few hours each year are higher than the "peak hour", but not many. In urban 
+and suburban areas, the peak hour normally occurs every weekday, and 200 or 
+more hours will all be about the same. On roads with large seasonal fluctuations
+in traffic, the peak hour is the four near the maximum for the year but 
+excluding a few (30 to 50 hours) that are exceedingly high and are not typical 
+of the frequency of the high hours occurring during the season.
+*definition of any variables, units, levels of categorical variables, and the
+data generating process, such as how data was collected if possible*
+
+**Peak Month ADT** - The peak month ADT is the average daily traffic for the 
+month of heaviest traffic flow. This data is obtained because on many routes, 
+high traffic volumes which occur during a certain season of the year are more
+representative of traffic conditions than the annual ADT.
+
+**Back and Ahead** - Back AADT, Peak Month, and Peak Hour usually represents 
+traffic South or West of the count location. A diagram can be found at
+<http://traffic-counts.dot.ca.gov/docs/traffic-counts-diagram.pdf>
+Ahead AADT, Peak Month, and Peak 
+Hour usually represents traffic North or East of the count location. A listing 
+of routes with their designated direction of travel is listed at 
+<http://traffic-counts.dot.ca.gov/rtedir.xls>
+
+I also obtained CA population data to do some correlations between traffic and population, from <http://www.dof.ca.gov/research/demographic/reports/estimates/e-2/documents/E-2_Report_July2010-2014w.xls>.  I saved the  E-2_Report_July2010-2014w tab into .csv revised July 1, 2012 and removed headers and read it in.  I also had to fix the column names and remove commas and convert field to numeri
+
+Obtaining the Data  
+
+The data came in Excel format. I downloaded it into Excel.  It had headers every 
+certain number of lines and I used Excel to insert '#' signs in front of each 
+but the first header and saved it as csv.  Then I read in the data to R ignoring 
+lines starting with '#' to eliminate the extra headers.
+
+  
+I obtained the county name/abbreviation by copying data from 
+<http://sv08data.dot.ca.gov/contractcost/map.html> and pasting into Excel and 
+saving as csv.  
+
+I also obtained the definitions for the letters in the Postmile Prefix column
+(X.1) and the Route Suffix (X) and Alignment (X.2) columns
+from 
+<http://www.dot.ca.gov/cwwp2/documentation/prefix-suffix-alignment-charts.htm>. 
+I saved them as csv files and loaded them into data frames.
+I had to add a blank row to represent a blank suffix or alignment or prefix.
+
+###Route Suffix Field Chart (column 3) 
+
+Route Suffix | Description
+--|---------------------
+S | Supplemental Route
+U | Unrelinquished Route   
+
+###Post Mile Prefix Field Chart (column 5)
+
+Prefix | Meaning
+--|---------
+C | Commercial lane
+D  | Duplicate post mile at meandering county line
+G	| Reposting of duplicate post mile at end of route
+H	| Realignment of D mileage
+L	| Overlap post mile
+M	| Realignment of R mileage
+N	| Realignment of M mileage
+R	| First realignment
+S	| Spur
+T	| Temporary connection
+U	| Unrelinquished
+
+
+###Alignment Field Chart (column 7)
+
+Alignment | Description
+--|-------------
+L |	Left independent alignment
+R |	Right independent alignment  
+
+I obtained the California population for July 1, 2012 for each county, at 
+<http://www.dof.ca.gov/research/demographic/reports/estimates/e-2/documents/E-2_Report_July2010-2014w.xls>
+and cleaned up the Excel file and saved it as a csv file.
+I joined the population on county name in the field county_pop.
+
+### Structure of the Dataset
+<pre>
+'data.frame':    6768 obs. of  17 variables:
+ $ dist           : Factor w/ 12 levels "1","2","3","4",..: 12 12 12 12 12 12 12 12 12 12 ...
+ $ route          : Factor w/ 243 levels "1","2","3","4",..: 1 1 1 1 1 1 1 1 1 1 ...
+ $ route_suffix   : Factor w/ 3 levels "","S","U": 1 1 1 1 1 1 1 1 1 1 ...
+ $ county         : chr  "ORA" "ORA" "ORA" "ORA" ...
+ $ postmile_prefix: Factor w/ 8 levels "","C","D","L",..: 6 6 1 1 1 1 6 6 1 1 ...
+ $ postmile       : num  0.129 0.78 8.43 9.418 9.6 ...
+ $ alignment      : Factor w/ 3 levels "","L","R": 1 1 1 1 1 1 1 1 1 1 ...
+ $ description    : Factor w/ 5762 levels ""," JCT. RTE. 101",..: 1129 1128 2623 2622 2619 2625 3508 3509 3510 3507 ...
+ $ back_peak_hour : int  NA 3750 2850 3000 3350 3150 4000 4250 4350 5400 ...
+ $ back_peak_month: int  NA 40000 38500 40500 39500 37500 49500 53000 53000 52000 ...
+ $ back_aadt      : int  NA 37000 36000 38000 37000 35000 45000 48000 48700 48500 ...
+ $ ahead_peak_hour: int  3750 3900 2850 3400 3350 3150 4800 4250 5300 5400 ...
+ $ ahead_peak_aadt: int  40000 42000 38500 40500 39500 38500 59000 53000 52000 52000 ...
+ $ ahead_aadt     : int  37000 38500 36000 38000 37000 35000 54000 48000 48700 48500 ...
+ $ county_name    : chr  "Orange" "Orange" "Orange" "Orange" ...
+ $ district       : int  12 12 12 12 12 12 12 12 12 12 ...
+ $ county_pop     : int  3073540 3073540 3073540 3073540 3073540 3073540 3073540 3073540 3073540 3073540 ...
+</pre>
