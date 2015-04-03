@@ -1,0 +1,39 @@
+Bibliography:
+http://stackoverflow.com/questions/25088144/how-to-load-df-with-1000-separator-in-r-as-numeric-class
+
+http://stackoverflow.com/questions/13616515/recommend-a-scale-colour-for-13-or-more-categories
+
+http://stackoverflow.com/questions/17844494/change-grid-line-behavior-in-ggplot2
+
+Data:
+http://traffic-counts.dot.ca.gov/docs/2013_aadt_volumes.pdf
+(I did not use this but I looked at it)
+
+Counties in California: http://en.wikipedia.org/wiki/List_of_counties_in_California and http://www.dot.ca.gov/hq/tsip/hseb/products/county_name.pdf
+
+Transportation Districts of California: http://en.wikipedia.org/wiki/California_Department_of_Transportation#Districts
+
+California Highways 
+<http://en.wikipedia.org/wiki/List_of_state_highways_in_California>
+
+Highway 101 http://en.wikipedia.org/wiki/U.S._Route_101_in_California
+
+More explanation of CA traffic data:
+http://www.dot.ca.gov/hq/tpp/offices/oasp/index_files/Overview_of_Postmile_System_GIS_Resources_EC_031513.pdf
+
+California Popluation Data
+<http://www.dof.ca.gov/research/demographic/reports/estimates/e-2/documents/E-2_Report_July2010-2014w.xls>
+
+How to analyze a linear model:
+http://blog.yhathq.com/posts/r-lm-summary.html
+
+General help, like correlation matrix
+http://kurt.schmidheiny.name/teaching/rguide.pdf
+
+http://stackoverflow.com/questions/3744178/ggplot2-sorting-a-plot
+
+I also obtained a lot of help from "Cookbook for R" at http://www.cookbook-r.com/ and other sites such as:
+http://daringfireball.net/projects/markdown/syntax
+http://zevross.com/blog/2014/08/04/beautiful-plotting-in-r-a-ggplot2-cheatsheet-3/
+http://www.rstudio.com/wp-content/uploads/2015/02/data-wrangling-cheatsheet.pdf
+http://stackoverflow.com
